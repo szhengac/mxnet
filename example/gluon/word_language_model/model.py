@@ -23,7 +23,8 @@ class RNNModel(gluon.Block):
     """A model with an encoder, recurrent layer, and a decoder."""
 
     def __init__(self, mode, vocab_size, num_embed, num_hidden,
-                 num_layers, dropout=0.5, tie_weights=False, **kwargs):
+                 num_layers, dropout=0.5, tie_weights=False,
+                 K=5, min_alpha=1, max_alpha=2, **kwargs):
         super(RNNModel, self).__init__(**kwargs)
         with self.name_scope():
             self.drop = nn.Dropout(dropout)
@@ -38,6 +39,9 @@ class RNNModel(gluon.Block):
             elif mode == 'lstm':
                 self.rnn = rnn.LSTM(num_hidden, num_layers, dropout=dropout,
                                     input_size=num_embed)
+            elif mode == 'mtlstm':
+                self.rnn = rnn.MTLSTM(num_hidden, num_layers, dropout=dropout,
+                                          input_size=num_embed, K=K, min_alpha=min_alpha, max_alpha=max_alpha)
             elif mode == 'gru':
                 self.rnn = rnn.GRU(num_hidden, num_layers, dropout=dropout,
                                    input_size=num_embed)

@@ -26,7 +26,7 @@ import data
 
 parser = argparse.ArgumentParser(description='MXNet Autograd RNN/LSTM Language Model on Wikitext-2.')
 parser.add_argument('--model', type=str, default='lstm',
-                    help='type of recurrent net (rnn_tanh, rnn_relu, lstm, gru)')
+                    help='type of recurrent net (rnn_tanh, rnn_relu, lstm, mtlstm, gru)')
 parser.add_argument('--emsize', type=int, default=200,
                     help='size of word embeddings')
 parser.add_argument('--nhid', type=int, default=200,
@@ -47,6 +47,12 @@ parser.add_argument('--dropout', type=float, default=0.2,
                     help='dropout applied to layers (0 = no dropout)')
 parser.add_argument('--tied', action='store_true',
                     help='tie the word embedding and softmax weights')
+parser.add_argument('--K', type=int, default=5,
+                    help='number of groups for MTLSTM cell')
+parser.add_argument('--min_alpha', type=float, default=1,
+                    help='minimum power for MTLSTM cell')
+parser.add_argument('--max_alpha', type=float, default=2,
+                    help='maximum power for MTLSTM cel')
 parser.add_argument('--cuda', action='store_true',
                     help='Whether to use gpu')
 parser.add_argument('--log-interval', type=int, default=200, metavar='N',
@@ -107,7 +113,8 @@ test_data = gluon.data.DataLoader(test_dataset,
 
 ntokens = len(vocab)
 model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid,
-                       args.nlayers, args.dropout, args.tied)
+                       args.nlayers, args.dropout, args.tied,
+                       args.K, args.min_alpha, args.max_alpha)
 model.collect_params().initialize(mx.init.Xavier(), ctx=context)
 
 compression_params = None if args.gctype == 'none' else {'type': args.gctype, 'threshold': args.gcthreshold}
