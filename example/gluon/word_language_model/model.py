@@ -23,27 +23,33 @@ class RNNModel(gluon.Block):
     """A model with an encoder, recurrent layer, and a decoder."""
 
     def __init__(self, mode, vocab_size, num_embed, num_hidden,
-                 num_layers, dropout=0.5, tie_weights=False,
+                 num_layers, dropout=0.5, tie_weights=False, scale=0.1,
                  K=5, min_alpha=1, max_alpha=2, **kwargs):
+        super(RNNModel, self).__init__(**kwargs)
         super(RNNModel, self).__init__(**kwargs)
         with self.name_scope():
             self.drop = nn.Dropout(dropout)
+            self.initializer = mx.init.Uniform(scale)
             self.encoder = nn.Embedding(vocab_size, num_embed,
-                                        weight_initializer=mx.init.Uniform(0.1))
+                                        weight_initializer=self.initializer)
             if mode == 'rnn_relu':
                 self.rnn = rnn.RNN(num_hidden, 'relu', num_layers, dropout=dropout,
+                                   i2h_weight_initializer=self.initializer, h2h_weight_initializer=self.initializer,
                                    input_size=num_embed)
             elif mode == 'rnn_tanh':
                 self.rnn = rnn.RNN(num_hidden, num_layers, dropout=dropout,
+                                   i2h_weight_initializer=self.initializer, h2h_weight_initializer=self.initializer,
                                    input_size=num_embed)
             elif mode == 'lstm':
                 self.rnn = rnn.LSTM(num_hidden, num_layers, dropout=dropout,
                                     input_size=num_embed)
             elif mode == 'mtlstm':
                 self.rnn = rnn.MTLSTM(num_hidden, num_layers, dropout=dropout,
-                                          input_size=num_embed, K=K, min_alpha=min_alpha, max_alpha=max_alpha)
+                                      i2h_weight_initializer=self.initializer, h2h_weight_initializer=self.initializer,
+                                      input_size=num_embed, K=K, min_alpha=min_alpha, max_alpha=max_alpha)
             elif mode == 'gru':
                 self.rnn = rnn.GRU(num_hidden, num_layers, dropout=dropout,
+                                   i2h_weight_initializer=self.initializer, h2h_weight_initializer=self.initializer,
                                    input_size=num_embed)
             else:
                 raise ValueError("Invalid mode %s. Options are rnn_relu, "
@@ -53,7 +59,7 @@ class RNNModel(gluon.Block):
                 self.decoder = nn.Dense(vocab_size, in_units=num_hidden,
                                         params=self.encoder.params)
             else:
-                self.decoder = nn.Dense(vocab_size, in_units=num_hidden)
+                self.decoder = nn.Dense(vocab_size, in_units=num_hidden, weight_initializer=self.initializer)
 
             self.num_hidden = num_hidden
 

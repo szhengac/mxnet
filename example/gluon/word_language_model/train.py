@@ -33,18 +33,20 @@ parser.add_argument('--nhid', type=int, default=200,
                     help='number of hidden units per layer')
 parser.add_argument('--nlayers', type=int, default=2,
                     help='number of layers')
-parser.add_argument('--lr', type=float, default=1.0,
+parser.add_argument('--lr', type=float, default=20,
                     help='initial learning rate')
-parser.add_argument('--clip', type=float, default=0.2,
+parser.add_argument('--clip', type=float, default=0.25,
                     help='gradient clipping')
 parser.add_argument('--epochs', type=int, default=40,
                     help='upper epoch limit')
-parser.add_argument('--batch_size', type=int, default=32, metavar='N',
+parser.add_argument('--batch_size', type=int, default=20, metavar='N',
                     help='batch size')
 parser.add_argument('--bptt', type=int, default=35,
                     help='sequence length')
 parser.add_argument('--dropout', type=float, default=0.2,
                     help='dropout applied to layers (0 = no dropout)')
+parser.add_argument('--scale', type=float, default=0.1,
+                    help='the weight is uniform sampled in the range [-scale, scale]')
 parser.add_argument('--tied', action='store_true',
                     help='tie the word embedding and softmax weights')
 parser.add_argument('--K', type=int, default=5,
@@ -113,7 +115,7 @@ test_data = gluon.data.DataLoader(test_dataset,
 
 ntokens = len(vocab)
 model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid,
-                       args.nlayers, args.dropout, args.tied,
+                       args.nlayers, args.dropout, args.tied, args.scale,
                        args.K, args.min_alpha, args.max_alpha)
 model.collect_params().initialize(mx.init.Xavier(), ctx=context)
 
