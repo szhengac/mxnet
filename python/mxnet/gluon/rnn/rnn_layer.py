@@ -21,7 +21,7 @@
 # pylint: disable=too-many-lines, arguments-differ
 """Definition of various recurrent neural network layers."""
 from __future__ import print_function
-__all__ = ['RNN', 'LSTM', 'GRU']
+__all__ = ['RNN', 'LSTM', 'MTLSTM', 'GRU']
 
 from ... import ndarray
 from .. import Block
@@ -34,7 +34,7 @@ class _RNNLayer(Block):
                  dropout, bidirectional, input_size,
                  i2h_weight_initializer, h2h_weight_initializer,
                  i2h_bias_initializer, h2h_bias_initializer,
-                 mode, **kwargs):
+                 mode, K=5, min_alpha=1, max_alpha=2, **kwargs):
         super(_RNNLayer, self).__init__(**kwargs)
         assert layout == 'TNC' or layout == 'NTC', \
             "Invalid layout %s; must be one of ['TNC' or 'NTC']"%layout
@@ -50,7 +50,11 @@ class _RNNLayer(Block):
         self._i2h_bias_initializer = i2h_bias_initializer
         self._h2h_bias_initializer = h2h_bias_initializer
 
-        self._gates = {'rnn_relu': 1, 'rnn_tanh': 1, 'lstm': 4, 'gru': 3}[mode]
+        self.K = K
+        self.min_alpha = min_alpha
+        self.max_alpha = max_alpha
+
+        self._gates = {'rnn_relu': 1, 'rnn_tanh': 1, 'lstm': 4, 'mtlstm': 4, 'gru': 3}[mode]
 
         self.i2h_weight = []
         self.h2h_weight = []
@@ -108,6 +112,10 @@ class _RNNLayer(Block):
                                                                   **kwargs),
                     'lstm': lambda **kwargs: rnn_cell.LSTMCell(self._hidden_size,
                                                                **kwargs),
+                    'mtlstm': lambda **kwargs: rnn_cell.MTLSTMCell(self._hidden_size,
+                                                                   K=self.K,
+                                                                   min_alpha=self.min_alpha, max_alpha=self.max_alpha,
+                                                                   **kwargs),
                     'gru': lambda **kwargs: rnn_cell.GRUCell(self._hidden_size,
                                                              **kwargs)}[self._mode]
 
@@ -185,7 +193,7 @@ class _RNNLayer(Block):
             for i in range(self._dir):
                 self.i2h_weight[i].shape = (self._gates*self._hidden_size, inputs.shape[2])
                 self.i2h_weight[i]._finish_deferred_init()
-        if inputs.context.device_type == 'gpu':
+        if inputs.context.device_type == 'gpu' and self._mode != 'mtlstm':
             out = self._forward_gpu(inputs, states)
         else:
             out = self._forward_cpu(inputs, states)
@@ -411,12 +419,106 @@ class LSTM(_RNNLayer):
                  dropout=0, bidirectional=False, input_size=0,
                  i2h_weight_initializer=None, h2h_weight_initializer=None,
                  i2h_bias_initializer='zeros', h2h_bias_initializer='zeros',
+                 K=5, min_alpha=1, max_alpha=2,
                  **kwargs):
         super(LSTM, self).__init__(hidden_size, num_layers, layout,
                                    dropout, bidirectional, input_size,
                                    i2h_weight_initializer, h2h_weight_initializer,
                                    i2h_bias_initializer, h2h_bias_initializer,
                                    'lstm', **kwargs)
+
+    def state_info(self, batch_size=0):
+        return [{'shape': (self._num_layers * self._dir, batch_size, self._hidden_size),
+                 '__layout__': 'LNC'},
+                {'shape': (self._num_layers * self._dir, batch_size, self._hidden_size),
+                 '__layout__': 'LNC'}]
+
+
+class MTLSTM(_RNNLayer):
+    r"""Applies a multi-layer long short-term memory (LSTM) RNN to an input sequence.
+
+    For each element in the input sequence, each layer computes the following
+    function:
+
+    .. math::
+        \begin{array}{ll}
+        i_t = sigmoid(W_{ii} x_t + b_{ii} + W_{hi} h_{(t-1)} + b_{hi}) \\
+        f_t = sigmoid(W_{if} x_t + b_{if} + W_{hf} h_{(t-1)} + b_{hf}) \\
+        g_t = \tanh(W_{ig} x_t + b_{ig} + W_{hc} h_{(t-1)} + b_{hg}) \\
+        o_t = sigmoid(W_{io} x_t + b_{io} + W_{ho} h_{(t-1)} + b_{ho}) \\
+        c_t = f_t * c_{(t-1)} + i_t * g_t \\
+        h_t = o_t * \tanh(c_t)
+        \end{array}
+
+    where :math:`h_t` is the hidden state at time `t`, :math:`c_t` is the
+    cell state at time `t`, :math:`x_t` is the hidden state of the previous
+    layer at time `t` or :math:`input_t` for the first layer, and :math:`i_t`,
+    :math:`f_t`, :math:`g_t`, :math:`o_t` are the input, forget, cell, and
+    out gates, respectively.
+
+    Parameters
+    ----------
+    hidden_size: int
+        The number of features in the hidden state h.
+    num_layers: int, default 1
+        Number of recurrent layers.
+    layout : str, default 'TNC'
+        The format of input and output tensors. T, N and C stand for
+        sequence length, batch size, and feature dimensions respectively.
+    dropout: float, default 0
+        If non-zero, introduces a dropout layer on the outputs of each
+        RNN layer except the last layer.
+    bidirectional: bool, default False
+        If `True`, becomes a bidirectional RNN.
+    i2h_weight_initializer : str or Initializer
+        Initializer for the input weights matrix, used for the linear
+        transformation of the inputs.
+    h2h_weight_initializer : str or Initializer
+        Initializer for the recurrent weights matrix, used for the linear
+        transformation of the recurrent state.
+    i2h_bias_initializer : str or Initializer, default 'lstmbias'
+        Initializer for the bias vector. By default, bias for the forget
+        gate is initialized to 1 while all other biases are initialized
+        to zero.
+    h2h_bias_initializer : str or Initializer
+        Initializer for the bias vector.
+    input_size: int, default 0
+        The number of expected features in the input x.
+        If not specified, it will be inferred from input.
+    prefix : str or None
+        Prefix of this `Block`.
+    params : `ParameterDict` or `None`
+        Shared Parameters for this `Block`.
+
+
+    Inputs:
+        - **data**: input tensor with shape `(sequence_length, batch_size, input_size)`
+          when `layout` is "TNC". For other layouts dimensions are permuted accordingly.
+        - **states**: a list of two initial recurrent state tensors. Each has shape
+          `(num_layers, batch_size, num_hidden)`. If `bidirectional` is True,
+          shape will instead be `(2*num_layers, batch_size, num_hidden)`. If
+          `states` is None, zeros will be used as default begin states.
+
+    Outputs:
+        - **out**: output tensor with shape `(sequence_length, batch_size, num_hidden)`
+          when `layout` is "TNC". If `bidirectional` is True, output shape will instead
+          be `(sequence_length, batch_size, 2*num_hidden)`
+        - **out_states**: a list of two output recurrent state tensors with the same
+          shape as in `states`. If `states` is None `out_states` will not be returned.
+
+
+    """
+    def __init__(self, hidden_size, num_layers=1, layout='TNC',
+                 dropout=0, bidirectional=False, input_size=0,
+                 i2h_weight_initializer=None, h2h_weight_initializer=None,
+                 i2h_bias_initializer='zeros', h2h_bias_initializer='zeros',
+                 K=5, min_alpha=1, max_alpha=2,
+                 **kwargs):
+        super(MTLSTM, self).__init__(hidden_size, num_layers, layout,
+                                   dropout, bidirectional, input_size,
+                                   i2h_weight_initializer, h2h_weight_initializer,
+                                   i2h_bias_initializer, h2h_bias_initializer,
+                                   'mtlstm', K, min_alpha, max_alpha, **kwargs)
 
     def state_info(self, batch_size=0):
         return [{'shape': (self._num_layers * self._dir, batch_size, self._hidden_size),

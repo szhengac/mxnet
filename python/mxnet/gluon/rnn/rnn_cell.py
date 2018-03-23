@@ -21,7 +21,7 @@
 # pylint: disable=too-many-lines, arguments-differ
 """Definition of various recurrent neural network cells."""
 __all__ = ['RecurrentCell', 'HybridRecurrentCell',
-           'RNNCell', 'LSTMCell', 'GRUCell',
+           'RNNCell', 'LSTMCell', 'MTLSTMCell', 'GRUCell',
            'SequentialRNNCell', 'DropoutCell',
            'ModifierCell', 'ZoneoutCell', 'ResidualCell',
            'BidirectionalCell']
@@ -480,6 +480,135 @@ class LSTMCell(HybridRecurrentCell):
                                   name=prefix+'out')
 
         return next_h, [next_h, next_c]
+
+
+class MTLSTMCell(HybridRecurrentCell):
+    r"""Long-Short Term Memory (LSTM) network cell.
+
+    Each call computes the following function:
+
+    .. math::
+        \begin{array}{ll}
+        i_t = sigmoid(W_{ii} x_t + b_{ii} + W_{hi} h_{(t-1)} + b_{hi}) \\
+        f_t = sigmoid(W_{if} x_t + b_{if} + W_{hf} h_{(t-1)} + b_{hf}) \\
+        g_t = \tanh(W_{ig} x_t + b_{ig} + W_{hc} h_{(t-1)} + b_{hg}) \\
+        o_t = sigmoid(W_{io} x_t + b_{io} + W_{ho} h_{(t-1)} + b_{ho}) \\
+        c_t = f_t * c_{(t-1)} + i_t * g_t \\
+        h_t = o_t * \tanh(c_t)
+        \end{array}
+
+    where :math:`h_t` is the hidden state at time `t`, :math:`c_t` is the
+    cell state at time `t`, :math:`x_t` is the hidden state of the previous
+    layer at time `t` or :math:`input_t` for the first layer, and :math:`i_t`,
+    :math:`f_t`, :math:`g_t`, :math:`o_t` are the input, forget, cell, and
+    out gates, respectively.
+
+    Parameters
+    ----------
+    hidden_size : int
+        Number of units in output symbol.
+    i2h_weight_initializer : str or Initializer
+        Initializer for the input weights matrix, used for the linear
+        transformation of the inputs.
+    h2h_weight_initializer : str or Initializer
+        Initializer for the recurrent weights matrix, used for the linear
+        transformation of the recurrent state.
+    i2h_bias_initializer : str or Initializer, default 'lstmbias'
+        Initializer for the bias vector. By default, bias for the forget
+        gate is initialized to 1 while all other biases are initialized
+        to zero.
+    h2h_bias_initializer : str or Initializer
+        Initializer for the bias vector.
+    prefix : str, default 'lstm_'
+        Prefix for name of `Block`s
+        (and name of weight if params is `None`).
+    params : Parameter or None
+        Container for weight sharing between cells.
+        Created if `None`.
+
+
+    Inputs:
+        - **data**: input tensor with shape `(batch_size, input_size)`.
+        - **states**: a list of two initial recurrent state tensors. Each has shape
+          `(batch_size, num_hidden)`.
+
+    Outputs:
+        - **out**: output tensor with shape `(batch_size, num_hidden)`.
+        - **next_states**: a list of two output recurrent state tensors. Each has
+          the same shape as `states`.
+    """
+    def __init__(self, hidden_size,
+                 i2h_weight_initializer=None, h2h_weight_initializer=None,
+                 i2h_bias_initializer='zeros', h2h_bias_initializer='zeros',
+                 input_size=0, K=5, min_alpha=1, max_alpha=2, prefix=None, params=None):
+        super(MTLSTMCell, self).__init__(prefix=prefix, params=params)
+
+        self._hidden_size = hidden_size
+        self._input_size = input_size
+        self.i2h_weight = self.params.get('i2h_weight', shape=(4*hidden_size, input_size),
+                                          init=i2h_weight_initializer,
+                                          allow_deferred_init=True)
+        self.h2h_weight = self.params.get('h2h_weight', shape=(4*hidden_size, hidden_size),
+                                          init=h2h_weight_initializer,
+                                          allow_deferred_init=True)
+        self.i2h_bias = self.params.get('i2h_bias', shape=(4*hidden_size,),
+                                        init=i2h_bias_initializer,
+                                        allow_deferred_init=True)
+        self.h2h_bias = self.params.get('h2h_bias', shape=(4*hidden_size,),
+                                        init=h2h_bias_initializer,
+                                        allow_deferred_init=True)
+
+        self.K = K
+        self.min_alpha = min_alpha
+        self.max_alpha = max_alpha
+        alpha_interval = (self.max_alpha - self.min_alpha) / self.K
+        self.powers = ndarray.arange(self.min_alpha, self.max_alpha, alpha_interval).asnumpy()
+
+    def state_info(self, batch_size=0):
+        return [{'shape': (batch_size, self._hidden_size), '__layout__': 'NC'},
+                {'shape': (batch_size, self._hidden_size), '__layout__': 'NC'}]
+
+    def _alias(self):
+        return 'lstm'
+
+    def __repr__(self):
+        s = '{name}({mapping})'
+        shape = self.i2h_weight.shape
+        mapping = '{0} -> {1}'.format(shape[1] if shape[1] else None, shape[0])
+        return s.format(name=self.__class__.__name__,
+                        mapping=mapping,
+                        **self.__dict__)
+
+    def hybrid_forward(self, F, inputs, states, i2h_weight,
+                       h2h_weight, i2h_bias, h2h_bias):
+        prefix = 't%d_'%self._counter
+        i2h = F.FullyConnected(data=inputs, weight=i2h_weight, bias=i2h_bias,
+                               num_hidden=self._hidden_size*4, name=prefix+'i2h')
+        h2h = F.FullyConnected(data=states[0], weight=h2h_weight, bias=h2h_bias,
+                               num_hidden=self._hidden_size*4, name=prefix+'h2h')
+        gates = i2h + h2h
+        slice_gates = F.SliceChannel(gates, num_outputs=4, name=prefix+'slice')
+        in_gate = F.Activation(slice_gates[0], act_type="sigmoid", name=prefix+'i')
+        forget_gate = F.Activation(slice_gates[1], act_type="sigmoid", name=prefix+'f')
+        in_transform = F.Activation(slice_gates[2], act_type="tanh", name=prefix+'c')
+        out_gate = F.Activation(slice_gates[3], act_type="sigmoid", name=prefix+'o')
+
+        slice_in_gates = F.SliceChannel(in_gate, num_outputs=self.K, name=prefix + 'slice_in')
+        slice_forget_gates = F.SliceChannel(forget_gate, num_outputs=self.K, name=prefix + 'slice_forget')
+        slice_in_transform = F.SliceChannel(in_transform, num_outputs=self.K, name=prefix + 'slice_transform')
+        slice_c = F.SliceChannel(states[1], num_outputs=self.K, name=prefix + 'slice_c')
+
+        slice_next_c = []
+        for i in range(self.K):
+            slice_next_c.append(F._internal._plus((1. - slice_forget_gates[i] ** self.powers[i]) * slice_c[i],
+                                                  (slice_in_gates[i] ** self.powers[i]) * slice_in_transform[i],
+                                                  name=prefix+'slice_state_%d'%i))
+        next_c = F.Concat(*slice_next_c)
+        next_h = F._internal._mul(out_gate, F.Activation(next_c, act_type="tanh"),
+                                  name=prefix+'out')
+
+        return next_h, [next_h, next_c]
+
 
 
 class GRUCell(HybridRecurrentCell):
