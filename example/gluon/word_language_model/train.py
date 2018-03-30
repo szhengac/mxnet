@@ -27,13 +27,13 @@ import data
 parser = argparse.ArgumentParser(description='MXNet Autograd RNN/LSTM Language Model on Wikitext-2.')
 parser.add_argument('--model', type=str, default='lstm',
                     help='type of recurrent net (rnn_tanh, rnn_relu, lstm, mtlstm, gru)')
-parser.add_argument('--emsize', type=int, default=200,
+parser.add_argument('--emsize', type=int, default=650,
                     help='size of word embeddings')
-parser.add_argument('--nhid', type=int, default=200,
+parser.add_argument('--nhid', type=int, default=650,
                     help='number of hidden units per layer')
 parser.add_argument('--nlayers', type=int, default=2,
                     help='number of layers')
-parser.add_argument('--lr', type=float, default=20,
+parser.add_argument('--lr', type=float, default=1,
                     help='initial learning rate')
 parser.add_argument('--clip', type=float, default=0.25,
                     help='gradient clipping')
@@ -43,7 +43,7 @@ parser.add_argument('--batch_size', type=int, default=20, metavar='N',
                     help='batch size')
 parser.add_argument('--bptt', type=int, default=35,
                     help='sequence length')
-parser.add_argument('--dropout', type=float, default=0.2,
+parser.add_argument('--dropout', type=float, default=0.5,
                     help='dropout applied to layers (0 = no dropout)')
 parser.add_argument('--scale', type=float, default=0.1,
                     help='the weight is uniform sampled in the range [-scale, scale]')
@@ -75,7 +75,7 @@ args = parser.parse_args()
 
 
 if args.cuda:
-    context = mx.gpu(0)
+    context = mx.gpu(3)
 else:
     context = mx.cpu(0)
 
@@ -117,12 +117,13 @@ ntokens = len(vocab)
 model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid,
                        args.nlayers, args.dropout, args.tied, args.scale,
                        args.K, args.min_alpha, args.max_alpha)
+model.hybridize()
 model.collect_params().initialize(mx.init.Xavier(), ctx=context)
 
 compression_params = None if args.gctype == 'none' else {'type': args.gctype, 'threshold': args.gcthreshold}
-trainer = gluon.Trainer(model.collect_params(), 'sgd',
+trainer = gluon.Trainer(model.collect_params(), 'ftml',
                         {'learning_rate': args.lr,
-                         'momentum': 0,
+                         #'momentum': 0,
                          'wd': 0},
                         compression_params=compression_params)
 loss = gluon.loss.SoftmaxCrossEntropyLoss()
@@ -191,10 +192,10 @@ def train():
             model.collect_params().save(args.save)
             print('test loss %.2f, test ppl %.2f'%(test_L, math.exp(test_L)))
         else:
-            args.lr = args.lr*0.25
-            trainer._init_optimizer('sgd',
+            args.lr = args.lr*0.996
+            trainer._init_optimizer('ftml',
                                     {'learning_rate': args.lr,
-                                     'momentum': 0,
+                                     #'momentum': 0,
                                      'wd': 0})
             model.collect_params().load(args.save, context)
 
