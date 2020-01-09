@@ -19,10 +19,7 @@
 # pylint: disable=too-many-lines
 """Contrib optimizers."""
 from ..ndarray import (NDArray, clip, contrib, mean, sqrt, square, zeros)
-from .optimizer import Optimizer
-
-# convenience wrapper for Optimizer.Register
-register = Optimizer.register  # pylint: disable=invalid-name
+from .optimizer import Optimizer, register
 
 __all__ = ['GroupAdaGrad']
 
