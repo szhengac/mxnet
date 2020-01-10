@@ -72,7 +72,7 @@ def test_lr_wd_mult():
     args2 = {k: v.asnumpy() for k, v in args2.items()}
 
     assert mod._optimizer.lr_mult == {'fc1_bias': 1.0, 'fc1_weight': 0.0}
-    assert mod._optimizer.wd_mult == {'fc2_bias': 0.5, 'fc2_weight': 0.5, 'fc1_bias': 0.0}
+    assert mod._optimizer.wd_mult == {'fc2_bias': 0.5, 'fc2_weight': 0.5}
     assert mx.test_utils.almost_equal(args1['fc1_weight'], args2['fc1_weight'], 1e-10)
     assert not mx.test_utils.almost_equal(args1['fc1_bias'], args2['fc1_bias'], 1e-1)
     assert not mx.test_utils.almost_equal(args1['fc2_weight'], args2['fc2_weight'], 1e-1)
