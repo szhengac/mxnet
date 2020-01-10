@@ -28,7 +28,7 @@ from ..ndarray import (sgd_update, sgd_mom_update,
                        mp_sgd_update, mp_sgd_mom_update,
                        preloaded_multi_sgd_update, preloaded_multi_sgd_mom_update,
                        preloaded_multi_mp_sgd_update, preloaded_multi_mp_sgd_mom_update)
-from .optimizer import Optimizer, register
+from .optimizer import Optimizer, register, _flatten_list
 
 __all__ = ['LARS']
 

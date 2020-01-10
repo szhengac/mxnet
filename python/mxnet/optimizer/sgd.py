@@ -23,8 +23,11 @@ import warnings
 import os
 import numpy
 from ..ndarray import (NDArray, zeros, clip, sqrt, cast, multi_sum_sq, multi_lars)
-from ..ndarray import (sgd_update, sgd_mom_update, mp_sgd_update, mp_sgd_mom_update)
-from .optimizer import Optimizer, register
+from ..ndarray import (sgd_update, sgd_mom_update,
+                       mp_sgd_update, mp_sgd_mom_update,
+                       multi_sgd_update, multi_sgd_mom_update,
+                       multi_mp_sgd_update, multi_mp_sgd_mom_update)
+from .optimizer import Optimizer, register, _flatten_list
 
 __all__ = ['SGD']
 
