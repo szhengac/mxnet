@@ -19,15 +19,14 @@
 # pylint: disable=too-many-lines
 """Base Optimizer class."""
 from __future__ import absolute_import
-import pickle
 import warnings
 import numpy
-from ..base import py_str
-from ..ndarray import (NDArray, zeros, clip, sqrt, cast, multi_sum_sq, multi_lars)
+from ..ndarray import (NDArray, zeros, cast)
 from ..util import is_np_array
+from .updater import Updater
 
 __all__ = [
-    'Optimizer', 'Test', 'Updater', 'create', 'get_updater', 'register'
+    'Optimizer', 'Test', 'create', 'register', 'get_updater'
 ]
 
 
@@ -308,10 +307,6 @@ class Optimizer(object):
         else:
             self.lr = lr
 
-    def set_lr_scale(self, args_lrscale): # pylint: disable=unused-argument
-        """[DEPRECATED] Sets lr scale. Use set_lr_mult instead."""
-        raise DeprecationWarning
-
     def set_lr_mult(self, args_lr_mult):
         """Sets an individual learning rate multiplier for each parameter.
 
@@ -348,11 +343,6 @@ class Optimizer(object):
     def set_wd_mult(self, args_wd_mult):
         """Sets an individual weight decay multiplier for each parameter.
 
-        By default, if `param_idx2name` was provided in the
-        constructor, the weight decay multipler is set as 0 for all
-        parameters whose name don't end with ``_weight`` or
-        ``_gamma``.
-
         .. note:: The default weight decay multiplier for a `Variable`
             can be set with its `wd_mult` argument in the constructor.
 
@@ -372,9 +362,6 @@ class Optimizer(object):
             compatibility, and we recommend to use the name instead.
         """
         self.wd_mult = {}
-        for n in self.idx2name.values():
-            if not (n.endswith('_weight') or n.endswith('_gamma')):
-                self.wd_mult[n] = 0.0
         if self.sym_info:
             attr, arg_names = self.sym_info
             for name in arg_names:
@@ -526,119 +513,6 @@ class Test(Optimizer):
 create = Optimizer.create_optimizer  # pylint: disable=invalid-name
 
 
-def _as_classic(a, allow_np):
-    # TODO(junwu): This is a temp solution for allowing converting
-    # np.ndarray to mx.nd.NDArray to be fed into the optimizer since
-    # users may have custom optimizers implemented using mx.nd.NDArray ops.
-    from ..numpy import ndarray as np_ndarray
-    if isinstance(a, (tuple, list)):
-        if any(isinstance(x, np_ndarray) for x in a):
-            if allow_np:
-                return [x.as_nd_ndarray() for x in a]
-            else:
-                raise ValueError('Converting np.ndarray to mx.nd.NDArray is not allowed')
-    else:
-        if isinstance(a, np_ndarray):
-            if allow_np:
-                return a.as_nd_ndarray()
-            else:
-                raise ValueError('Converting np.ndarray to mx.nd.NDArray is not allowed')
-    return a
-
-
-class Updater(object):
-    """Updater for kvstore."""
-    def __init__(self, optimizer):
-        self.optimizer = optimizer
-        self.states = {}
-        self.states_synced = {}
-        self.aggregate_updates = optimizer.aggregate_num > 0
-
-    def __call__(self, index, grad, weight):
-        """Updates weight given gradient and index."""
-        allow_np = self.optimizer.allow_np_array if hasattr(self.optimizer, "allow_np_array") else is_np_array()
-        if not isinstance(index, (list, tuple)):
-            indices = [index]
-            grads = [_as_classic(grad, allow_np)]
-            weights = [_as_classic(weight, allow_np)]
-        else:
-            indices = index
-            grads = _as_classic(grad, allow_np)
-            weights = _as_classic(weight, allow_np)
-        if weights:
-            self.optimizer._set_current_context(weights[0].context.device_id)
-        for i, idx in enumerate(indices):
-            # convert ctypes.char_p.value back to python str if needed
-            if isinstance(idx, bytes):
-                indices[i] = py_str(idx)
-                idx = indices[i]
-            if idx not in self.states:
-                self.states[idx] = self.optimizer.create_state_multi_precision(idx, weights[i])
-                self.states_synced[idx] = True
-            elif not self.states_synced[idx]:
-                self.states[idx] = \
-                    self.sync_state_context(self.states[idx], weights[i].context)
-                self.states_synced[idx] = True
-        if self.aggregate_updates:
-            # segregate values based on type
-            type_map = {}
-            for i, w, g in zip(indices, weights, grads):
-                if w.dtype in type_map:
-                    type_map[w.dtype].append((i, w, g))
-                else:
-                    type_map[w.dtype] = [(i, w, g)]
-            for idx in type_map:
-                current_index = 0
-                indices, weights, grads = zip(*type_map[idx])
-                while current_index < len(indices):
-                    states = []
-                    step = min(self.optimizer.aggregate_num, len(indices) - current_index)
-                    for j in range(step):
-                        states.append(self.states[indices[current_index + j]])
-                    self.optimizer.update_multi_precision(
-                        indices[current_index:current_index + self.optimizer.aggregate_num],
-                        weights[current_index:current_index + self.optimizer.aggregate_num],
-                        grads[current_index:current_index + self.optimizer.aggregate_num],
-                        states)
-                    current_index += self.optimizer.aggregate_num
-        else:
-            for i, w, g in zip(indices, weights, grads):
-                self.optimizer.update_multi_precision(i, w, g, self.states[i])
-
-    def sync_state_context(self, state, context):
-        """sync state context."""
-        if isinstance(state, NDArray):
-            return state.as_in_context(context)
-        elif isinstance(state, (tuple, list)):
-            synced_state = (self.sync_state_context(i, context) for i in state)
-            if isinstance(state, tuple):
-                return tuple(synced_state)
-            else:
-                return list(synced_state)
-        else:
-            return state
-
-    def set_states(self, states):
-        """Sets updater states."""
-        states = pickle.loads(states)
-        if isinstance(states, tuple) and len(states) == 2:
-            self.states, self.optimizer = states
-        else:
-            self.states = states
-        self.states_synced = dict.fromkeys(self.states.keys(), False)
-
-    def get_states(self, dump_optimizer=False):
-        """Gets updater states.
-
-        Parameters
-        ----------
-        dump_optimizer : bool, default False
-            Whether to also save the optimizer itself. This would also save optimizer
-            information such as learning rate and weight decay schedules.
-        """
-        return pickle.dumps((self.states, self.optimizer) if dump_optimizer else self.states)
-
-
 def get_updater(optimizer):
     """Returns a closure of the updater needed for kvstore.
 
@@ -653,3 +527,4 @@ def get_updater(optimizer):
          The closure of the updater.
     """
     return Updater(optimizer)
+
