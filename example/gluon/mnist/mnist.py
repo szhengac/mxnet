@@ -20,6 +20,7 @@ from __future__ import print_function
 
 import argparse
 import logging
+import time
 logging.basicConfig(level=logging.DEBUG)
 
 import numpy as np
@@ -49,8 +50,9 @@ opt = parser.parse_args()
 
 net = nn.Sequential()
 with net.name_scope():
-    net.add(nn.Dense(128, activation='relu'))
-    net.add(nn.Dense(64, activation='relu'))
+    net.add(nn.Dense(1024, activation='relu'))
+    net.add(nn.Dense(1024, activation='relu'))
+    net.add(nn.Dense(1024, activation='relu'))
     net.add(nn.Dense(10))
 
 # data
@@ -84,14 +86,15 @@ def train(epochs, ctx):
     # Collect all parameters from net and its children, then initialize them.
     net.initialize(mx.init.Xavier(magnitude=2.24), ctx=ctx)
     # Trainer is for updating parameters with gradient.
-    trainer = gluon.Trainer(net.collect_params(), 'sgd',
-                            {'learning_rate': opt.lr, 'momentum': opt.momentum})
+    trainer = gluon.Trainer(net.collect_params(), 'test',
+                            {'learning_rate': opt.lr})
     metric = mx.metric.Accuracy()
     loss = gluon.loss.SoftmaxCrossEntropyLoss()
 
     for epoch in range(epochs):
         # reset data iterator and metric at begining of epoch.
         metric.reset()
+        start = time.time()
         for i, (data, label) in enumerate(train_data):
             # Copy data to ctx if necessary
             data = data.as_in_context(ctx)
@@ -110,6 +113,8 @@ def train(epochs, ctx):
             if i % opt.log_interval == 0 and i > 0:
                 name, acc = metric.get()
                 print('[Epoch %d Batch %d] Training: %s=%f'%(epoch, i, name, acc))
+        end = time.time()
+        print(end - start)
 
         name, acc = metric.get()
         print('[Epoch %d] Training: %s=%f'%(epoch, name, acc))

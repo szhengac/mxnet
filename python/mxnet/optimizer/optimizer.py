@@ -1983,12 +1983,25 @@ class Test(Optimizer):
 
     def create_state(self, index, weight):
         """Creates a state to duplicate weight."""
-        return zeros(weight.shape, weight.context)
+        return (zeros(weight.shape, weight.context), zeros(weight.shape, weight.context))
 
     def update(self, index, weight, grad, state):
         """Performs w += rescale_grad * grad."""
-        weight[:] += grad * self.rescale_grad
-        state[:] = weight
+        assert(isinstance(weight, NDArray))
+        assert(isinstance(grad, NDArray))
+        self._update_count(index)
+        lr = self._get_lr(index)
+        wd = self._get_wd(index)
+        t = self._index_update_count[index]
+        grad = grad * self.rescale_grad + wd * weight
+        m_t, v_t = state
+        m_t[:] *= 0.9
+        m_t[:] += 0.1 * grad
+        v_t[:] *= 0.999
+        v_t[:] += 0.001 * grad * grad
+        d = m_t / (sqrt(v_t) + 1e-8)
+        lr *= math.sqrt(1. - 0.999**t) / (1. - 0.9**t)
+        weight[:] -= lr * d
 
 # backward compatibility wrapper for Optimizer.CreateOptimizer
 create = Optimizer.create_optimizer  # pylint: disable=invalid-name
