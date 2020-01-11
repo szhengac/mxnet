@@ -21,7 +21,8 @@
 from __future__ import absolute_import
 import warnings
 import numpy
-from ..ndarray import (NDArray, zeros, cast)
+from ..ndarray import (NDArray, zeros, cast, array)
+from ..gluon import HybridBlock
 from ..util import is_np_array
 from .updater import Updater
 
@@ -34,7 +35,7 @@ def _flatten_list(nested_list):
     return [item for sublist in nested_list for item in sublist]
 
 
-class Optimizer(object):
+class Optimizer(HybridBlock):
     """The base class inherited by all optimizers.
 
     Parameters
@@ -88,7 +89,8 @@ class Optimizer(object):
     def __init__(self, rescale_grad=1., param_idx2name=None, wd=0.,
                  clip_gradient=None, learning_rate=None,
                  lr_scheduler=None, sym=None, begin_num_update=0,
-                 multi_precision=False, param_dict=None):
+                 multi_precision=False, param_dict=None, **kwargs):
+        super(Optimizer, self).__init__(**kwargs)
         self.rescale_grad = rescale_grad
         self.lr_scheduler = lr_scheduler
         if self.lr_scheduler is None and learning_rate is None:
@@ -245,50 +247,111 @@ class Optimizer(object):
                           "optimizer")
         return self.create_state(index, weight)
 
-    def update(self, index, weight, grad, state):
-        """Updates the given parameter using the corresponding gradient and state.
+    def auxiliary_opt_vars(self, indices):
+        """ return auxiliary optimizer variables such as t, lr, wd for all the weights,
+        where each weight is identified by the corresponding index.
 
         Parameters
         ----------
-        index : int
-            The unique index of the parameter into the individual learning
-            rates and weight decays. Learning rates and weight decay
-            may be set via `set_lr_mult()` and `set_wd_mult()`, respectively.
-        weight : NDArray
-            The parameter to be updated.
-        grad : NDArray
-            The gradient of the objective with respect to this parameter.
-        state : any obj
-            The state returned by `create_state()`.
-        """
-        raise NotImplementedError()
+        indices : list of int
+            List of unique indices to identify the weights.
 
-    def update_multi_precision(self, index, weight, grad, state):
-        """Updates the given parameter using the corresponding gradient and state.
+        Returns
+        -------
+        list of list of scalars or NDArray.
+        """
+        opt_vars = []
+        for index in indices:
+            self._update_count(index)
+            lr = self._get_lr(index)
+            wd = self._get_wd(index)
+            t = self._index_update_count[index]
+            opt_vars.append((t, lr, wd))
+        return opt_vars
+
+    def update(self, indices, weights, grads, states):
+        """Updates the given list of parameters using the corresponding gradients and states.
+
+        Parameters
+        ----------
+        indices : list of int
+            List of unique indices of the parameters into the individual learning rates
+            and weight decays. Learning rates and weight decay may be set via `set_lr_mult()`
+            and `set_wd_mult()`, respectively.
+        weights : list of NDArray
+            List of parameters to be updated.
+        grads : list of NDArray
+            List of gradients of the objective with respect to this parameter.
+        states : List of any obj
+            List of state returned by `create_state()`.
+        """
+        for weight, grad in zip(weights, grads):
+            assert(isinstance(weight, NDArray))
+            assert(isinstance(grad, NDArray))
+
+        auxiliary_opt_vars = []
+        for vars_per_index in self.auxiliary_opt_vars(indices):
+            opt_vars = []
+            for var in vars_per_index:
+                opt_vars.append(array(var, ctx=weights[0].context)
+                                if type(var) in (tuple, list)
+                                else array([var], ctx=weights[0].context))
+            auxiliary_opt_vars.append(opt_vars)
+
+        new_weights, new_states = \
+            super(Optimizer, self).forward(auxiliary_opt_vars, weights, grads, states)
+
+        for weight, state, new_weight, new_state in zip(weights, states, new_weights, new_states):
+            weight[:] = new_weight
+            for s, ns in zip(state, new_state):
+                s[:] = ns
+
+    def update_multi_precision(self, indices, weights, grads, states):
+        """Updates the given list of parameters using the corresponding gradient and state.
         Mixed precision version.
 
         Parameters
         ----------
-        index : int
-            The unique index of the parameter into the individual learning
-            rates and weight decays. Learning rates and weight decay
-            may be set via `set_lr_mult()` and `set_wd_mult()`, respectively.
-        weight : NDArray
-            The parameter to be updated.
-        grad : NDArray
-            The gradient of the objective with respect to this parameter.
-        state : any obj
-            The state returned by `create_state()`.
+        indices : list of int
+            List of unique indices of the parameters into the individual learning rates
+            and weight decays. Learning rates and weight decay may be set via `set_lr_mult()`
+            and `set_wd_mult()`, respectively.
+        weights : list of NDArray
+            List of parameters to be updated.
+        grads : list of NDArray
+            List of gradients of the objective with respect to this parameter.
+        states : List of any obj
+            List of state returned by `create_state()`.
         """
-        if self.multi_precision and weight.dtype == numpy.float16:
-            # Wrapper for mixed precision
-            weight_master_copy = state[0]
-            original_state = state[1]
-            grad32 = grad.astype(numpy.float32)
-            self.update(index, weight_master_copy, grad32, original_state)
-            cast(weight_master_copy, dtype=weight.dtype, out=weight)
+        if self.multi_precision and weights[0].dtype == numpy.float16:
+            weights_master_copy = []
+            original_states = []
+            grads32 = []
+            for grad, state in zip(grads, states):
+                weights_master_copy.append(state[0])
+                original_states.append(state[1])
+                grads32.append(grad.astype(numpy.float32))
+            self.update(indices, weights_master_copy, grads32, original_states)
+            for weight_master_copy, weight in zip(weights_master_copy, weights):
+                cast(weight_master_copy, dtype=weight.dtype, out=weight)
         else:
-            self.update(index, weight, grad, state)
+            self.update(indices, weights, grads, states)
+
+    def hybrid_forward(self, F, auxiliary_opt_vars, weights, grads, states):
+        """Updates the given list of parameters using the corresponding gradients and states.
+
+        Parameters
+        ----------
+        auxiliary_opt_vars : list of NDArray or Symbol
+            List of auxiliary optimizer variables such as t, lr, wd
+        weights : list of NDArray or Symbol
+            List of parameters to be updated.
+        grads : list of NDArray or Symbol
+            List of gradients of the objective with respect to this parameter.
+        states : List of any obj
+            List of state returned by `create_state()`.
+        """
+        raise NotImplementedError
 
     def set_learning_rate(self, lr):
         """Sets a new learning rate of the optimizer.
@@ -504,10 +567,15 @@ class Test(Optimizer):
         """Creates a state to duplicate weight."""
         return zeros(weight.shape, weight.context)
 
-    def update(self, index, weight, grad, state):
+    def hybrid_forward(self, F, auxiliary_opt_vars, weights, grads, states):
         """Performs w += rescale_grad * grad."""
-        weight[:] += grad * self.rescale_grad
-        state[:] = weight
+        new_weights = []
+        for opt_vars, weight, grad in zip(auxiliary_opt_vars, weights, grads):
+            t, lr, wd = opt_vars
+            grad = self.rescale_grad * grad
+            weight = weight - lr * (grad + wd * weight)
+            new_weights.append(weight)
+        return new_weights, states
 
 # backward compatibility wrapper for Optimizer.CreateOptimizer
 create = Optimizer.create_optimizer  # pylint: disable=invalid-name

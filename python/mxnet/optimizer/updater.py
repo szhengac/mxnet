@@ -103,8 +103,7 @@ class Updater(object):
                         states)
                     current_index += self.optimizer.aggregate_num
         else:
-            for i, w, g in zip(indices, weights, grads):
-                self.optimizer.update_multi_precision(i, w, g, self.states[i])
+            self.optimizer.update_multi_precision(indices, weights, grads, self.states)
 
     def sync_state_context(self, state, context):
         """sync state context."""
