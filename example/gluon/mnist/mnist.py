@@ -50,8 +50,9 @@ opt = parser.parse_args()
 
 net = nn.Sequential()
 with net.name_scope():
-    net.add(nn.Dense(128, activation='relu'))
-    net.add(nn.Dense(64, activation='relu'))
+    net.add(nn.Dense(1024, activation='relu'))
+    net.add(nn.Dense(1024, activation='relu'))
+    net.add(nn.Dense(1024, activation='relu'))
     net.add(nn.Dense(10))
 
 # data

@@ -567,18 +567,25 @@ class Test(Optimizer):
 
     def create_state(self, index, weight):
         """Creates a state to duplicate weight."""
-        return zeros(weight.shape, weight.context)
+        return (zeros(weight.shape, weight.context), zeros(weight.shape, weight.context))
 
     def hybrid_forward(self, F, auxiliary_opt_vars, weights, grads, states):
         """Performs w += rescale_grad * grad."""
         new_weights = []
-        for opt_vars, weight, grad in zip(auxiliary_opt_vars, weights, grads):
+        new_states = []
+        for opt_vars, weight, grad, state in zip(auxiliary_opt_vars, weights, grads, states):
             t, lr, wd = opt_vars
+            m, v = state
             grad = self.rescale_grad * grad
-            d = grad + F.broadcast_mul(wd, weight)
+            grad = grad + F.broadcast_mul(wd, weight)
+            m = 0.9 * m + 0.1 * grad
+            v = 0.999 * v + 0.001 * grad * grad
+            d = F.broadcast_div(m, F.sqrt(v) + 1e-8)
+            lr = lr * F.sqrt(1 - F.power(0.999, t)) / (1 - F.power(0.9, t)) 
             weight = weight - F.broadcast_mul(lr, d)
             new_weights.append(weight)
-        return new_weights, states
+            new_states.append((m, v))
+        return new_weights, new_states
 
 # backward compatibility wrapper for Optimizer.CreateOptimizer
 create = Optimizer.create_optimizer  # pylint: disable=invalid-name
