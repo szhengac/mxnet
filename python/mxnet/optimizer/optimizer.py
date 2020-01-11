@@ -22,12 +22,11 @@ from __future__ import absolute_import
 import warnings
 import numpy
 from ..ndarray import (NDArray, zeros, cast, array)
-from ..gluon import HybridBlock
+from ..gluon.block import HybridBlock
 from ..util import is_np_array
-from .updater import Updater
 
 __all__ = [
-    'Optimizer', 'Test', 'create', 'register', 'get_updater'
+    'Optimizer', 'Test', 'create', 'register'
 ]
 
 
@@ -303,8 +302,11 @@ class Optimizer(HybridBlock):
 
         for weight, state, new_weight, new_state in zip(weights, states, new_weights, new_states):
             weight[:] = new_weight
-            for s, ns in zip(state, new_state):
-                s[:] = ns
+            if isinstance(state, (tuple, list)): 
+                for s, ns in zip(state, new_state):
+                    s[:] = ns
+            else:
+                state[:] = new_state
 
     def update_multi_precision(self, indices, weights, grads, states):
         """Updates the given list of parameters using the corresponding gradient and state.
@@ -573,26 +575,10 @@ class Test(Optimizer):
         for opt_vars, weight, grad in zip(auxiliary_opt_vars, weights, grads):
             t, lr, wd = opt_vars
             grad = self.rescale_grad * grad
-            weight = weight - lr * (grad + wd * weight)
+            d = grad + F.broadcast_mul(wd, weight)
+            weight = weight - F.broadcast_mul(lr, d)
             new_weights.append(weight)
         return new_weights, states
 
 # backward compatibility wrapper for Optimizer.CreateOptimizer
 create = Optimizer.create_optimizer  # pylint: disable=invalid-name
-
-
-def get_updater(optimizer):
-    """Returns a closure of the updater needed for kvstore.
-
-    Parameters
-    ----------
-    optimizer: Optimizer
-         The optimizer.
-
-    Returns
-    -------
-    updater: function
-         The closure of the updater.
-    """
-    return Updater(optimizer)
-

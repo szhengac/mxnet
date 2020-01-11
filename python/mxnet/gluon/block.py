@@ -28,7 +28,8 @@ from collections import OrderedDict, defaultdict
 import numpy as np
 
 from ..base import mx_real_t, MXNetError
-from .. import symbol, ndarray, initializer, np_symbol
+from .. import symbol, ndarray, initializer
+from ..symbol.numpy import _symbol as np_symbol
 from ..symbol import Symbol
 from ..ndarray import NDArray
 from .. import name as _name

@@ -21,7 +21,8 @@
 __all__ = ['Trainer']
 
 from .. import optimizer as opt
-from ..model import _create_kvstore, _create_sparse_kvstore
+#from ..model import _create_kvstore, _create_sparse_kvstore
+from .. import model
 from .parameter import ParameterDict, Parameter
 from ..kvstore import KVStore
 
@@ -183,7 +184,7 @@ class Trainer(object):
             #    - backward()
             #    - push_and_update(grad)
             #    - pull(weight)
-            kvstore, update_on_kvstore = _create_sparse_kvstore(config['kvstore'])
+            kvstore, update_on_kvstore = model._create_sparse_kvstore(config['kvstore'])
             self._distributed = 'dist' in kvstore.type
             # raise err if user provides unsupported configs
             if config['update_on_kvstore'] is False:
@@ -211,7 +212,7 @@ class Trainer(object):
             #    - push_and_update(grad)
             #    - pull(weight)
             arg_arrays = {param.name: param.data(self._contexts[0]) for param in self._params}
-            kvstore, _ = _create_kvstore(config['kvstore'], len(self._contexts), arg_arrays)
+            kvstore, _ = model._create_kvstore(config['kvstore'], len(self._contexts), arg_arrays)
             self._distributed = 'dist' in kvstore.type if kvstore else False
             update_on_kvstore = self._distributed
             # raise err if user provides unsupported configs
@@ -229,8 +230,8 @@ class Trainer(object):
             # Training with dense weight and dense gradients.
             # The only unsupported mode is async with update_on_kvstore=False
             arg_arrays = {param.name: param.data(self._contexts[0]) for param in self._params}
-            kvstore, update_on_kvstore = _create_kvstore(config['kvstore'], len(self._contexts),
-                                                         arg_arrays)
+            kvstore, update_on_kvstore = model._create_kvstore(config['kvstore'], len(self._contexts),
+                                                               arg_arrays)
             self._distributed = 'dist' in kvstore.type if kvstore else False
             if self._distributed and 'async' in kvstore.type:
                 update_on_kvstore = True

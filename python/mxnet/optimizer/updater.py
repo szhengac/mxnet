@@ -24,7 +24,7 @@ from ..base import py_str
 from ..ndarray import NDArray
 from ..util import is_np_array
 
-__all__ = ['Updater']
+__all__ = ['Updater', 'get_updater']
 
 
 def _as_classic(a, allow_np):
@@ -103,7 +103,8 @@ class Updater(object):
                         states)
                     current_index += self.optimizer.aggregate_num
         else:
-            self.optimizer.update_multi_precision(indices, weights, grads, self.states)
+            states = [self.states[i] for i in indices]
+            self.optimizer.update_multi_precision(indices, weights, grads, states)
 
     def sync_state_context(self, state, context):
         """sync state context."""
@@ -137,3 +138,19 @@ class Updater(object):
             information such as learning rate and weight decay schedules.
         """
         return pickle.dumps((self.states, self.optimizer) if dump_optimizer else self.states)
+
+
+def get_updater(optimizer):
+    """Returns a closure of the updater needed for kvstore.
+
+    Parameters
+    ----------
+    optimizer: Optimizer
+         The optimizer.
+
+    Returns
+    -------
+    updater: function
+         The closure of the updater.
+    """
+    return Updater(optimizer)
