@@ -53,6 +53,13 @@ with net.name_scope():
     net.add(nn.Dense(1024, activation='relu'))
     net.add(nn.Dense(1024, activation='relu'))
     net.add(nn.Dense(1024, activation='relu'))
+    net.add(nn.Dense(1024, activation='relu'))
+    net.add(nn.Dense(1024, activation='relu'))
+    net.add(nn.Dense(1024, activation='relu'))
+    net.add(nn.Dense(1024, activation='relu'))
+    net.add(nn.Dense(1024, activation='relu'))
+    net.add(nn.Dense(1024, activation='relu'))
+    net.add(nn.Dense(1024, activation='relu'))
     net.add(nn.Dense(10))
 
 # data
