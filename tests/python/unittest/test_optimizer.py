@@ -547,14 +547,13 @@ class PyNesLAMB(mx.optimizer.Optimizer):
         Python reference implementation of LAMB optimizer.
     """
     def __init__(self, learning_rate=0.001, beta1=0.9, beta2=0.999, epsilon=1e-6,
-                 lower_bound=None, upper_bound=None, bias_correction=True, **kwargs):
+                 lower_bound=None, upper_bound=None, **kwargs):
         super(PyNesLAMB, self).__init__(learning_rate=learning_rate, **kwargs)
         self.beta1 = beta1
         self.beta2 = beta2
         self.epsilon = epsilon
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
-        self.bias_correction = bias_correction
 
     def create_state(self, index, weight):
         stype = weight.stype
@@ -571,20 +570,20 @@ class PyNesLAMB(mx.optimizer.Optimizer):
         # preprocess grad
         grad /= grad.norm()
         if self.clip_gradient is not None:
-            grad = clip(grad, -self.clip_gradient, self.clip_gradient)
+            grad = mx.nd.clip(grad, -self.clip_gradient, self.clip_gradient)
 
         # update mean, var
         mean, var = state
         mean[:] *= self.beta1
         mean[:] += (1. - self.beta1) * grad
         var[:] *= self.beta2
-        var[:] += (1. - self.beta2) * square(grad)
+        var[:] += (1. - self.beta2) * (grad * grad)
 
         r1 = weight.norm()
         if self.lower_bound is not None:
-            r1 = maximum(r1, self.lower_bound)
+            r1 = mx.nd.maximum(r1, self.lower_bound)
         if self.upper_bound is not None:
-            r1 = minimum(r1, self.upper_bound)
+            r1 = mx.nd.minimum(r1, self.upper_bound)
 
         # apply bias correction
         coef1 = self.beta1**t
@@ -594,7 +593,7 @@ class PyNesLAMB(mx.optimizer.Optimizer):
         mean_hat = mean * (self.beta1 / coef1_t_plus_1)
         mean_hat += ((1 - self.beta1) / coef1) * grad
         var_hat = var / coef2
-        sqrt(var_hat, out=var_hat)
+        mx.nd.sqrt(var_hat, out=var_hat)
         var_hat += self.epsilon
         mean_hat /= var_hat
         mean_hat += wd * weight
@@ -606,7 +605,7 @@ class PyNesLAMB(mx.optimizer.Optimizer):
         ratio = r1 / r2
         # becomes NaN if ratio == NaN or 0, otherwise 0
         nan_or_zero = 1 - ratio / ratio
-        r = where(nan_or_zero, ones_like(ratio), ratio)
+        r = mx.nd.where(nan_or_zero, mx.nd.ones_like(ratio), ratio)
 
         # update weight
         g *= (self.beta1 * lr) * r
@@ -619,9 +618,9 @@ def test_multineslamb():
     opt2 = mx.optimizer.NesLAMB
 
     # shapes as Bert-large
-    dims_x = [1024, 4096, 1024, 1024]
-    dims_y = [1, 1, 1024, 4096]
-    dims_occurrences = [9, 1, 4, 2]
+    dims_x = [64, 32, 16, 16]
+    dims_y = [1, 1, 8, 16]
+    dims_occurrences = [2, 1, 2, 3]
     nlayers = 4 # 24
     # extra_dims_x=[30522, 512, 30522]
     # extra_dims_y=[1, 1024, 1024]
@@ -636,24 +635,21 @@ def test_multineslamb():
     cg_options = [{}, {'clip_gradient': 0.4}, {'clip_gradient': 0.5}]
     rg_options = [{}, {'rescale_grad': 0.14}, {'rescale_grad': 0.8}]
     wd_options = [{}, {'wd': 0.03}, {'wd': 0.05}, {'wd': 0.07}]
-    bias_options = [{'bias_correction': False}, {'bias_correction': True}]
 
     for dtype in [np.float16, np.float32, np.float64]:
         for cg_option in cg_options:
             for rg_option in rg_options:
                 for wd_option in wd_options:
-                    for bias_option in bias_options:
-                        kwarg = {}
-                        kwarg.update(cg_option)
-                        kwarg.update(rg_option)
-                        kwarg.update(wd_option)
-                        kwarg.update(bias_option)
-                        if (dtype == np.float16):
-                            kwarg.update({'multi_precision': True})
-                        atol = 1e-3
-                        rtol = 1e-6
-                        compare_optimizer(opt1(**kwarg), opt2(**kwarg), shapes, dtype,
-                                          rtol=rtol, atol=atol, ntensors=len(shapes))
+                    kwarg = {}
+                    kwarg.update(cg_option)
+                    kwarg.update(rg_option)
+                    kwarg.update(wd_option)
+                    if (dtype == np.float16):
+                        kwarg.update({'multi_precision': True})
+                    atol = 1e-3
+                    rtol = 1e-6
+                    compare_optimizer(opt1(**kwarg), opt2(**kwarg), shapes, dtype,
+                                      rtol=rtol, atol=atol, ntensors=len(shapes))
 
 
 #SGLD
