@@ -133,7 +133,7 @@ void CallKernel1(Stream<cpu>* s,
                   const MultiNesLAMBKernelParam<DType, MPDType>& kernel_params,
                   const MultiNesLAMBParam &param,
                   float* g_sq_norm,
-                  float* temp_m
+                  float* temp_m,
                   float* temp_g,
                   int* block_to_tensor,
                   int* block_to_chunk) {
@@ -154,7 +154,7 @@ void CallKernel2(Stream<cpu>* s,
                   const MultiNesLAMBKernelParam<DType, MPDType>& kernel_params,
                   const MultiNesLAMBParam &param,
                   float* r1, float* r2_m, float* r2_g,
-                  float*, temp_m, float* temp_g,
+                  float* temp_m, float* temp_g,
                   int* block_to_tensor,
                   int* block_to_chunk,
                   const OpReqType req) {

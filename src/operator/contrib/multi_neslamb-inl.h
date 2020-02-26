@@ -308,6 +308,8 @@ inline void MultiNesLAMB(const nnvm::NodeAttrs& attrs,
 
     // Create tensors
     size_t pos_wspace = required_storage_multi_sum_sq;
+    Tensor<xpu, 1, float> temp_m(reinterpret_cast<float*>(&workspace[pos_wspace]),
+      Shape1(kernel_params.total_size), s);
     Tensor<xpu, 1, float> temp_g(reinterpret_cast<float*>(&workspace[pos_wspace]),
       Shape1(kernel_params.total_size), s);
     // create vector of TBlob with all the temp_m and temp_g contiguous
@@ -345,9 +347,9 @@ inline void MultiNesLAMB(const nnvm::NodeAttrs& attrs,
       Shape1(kernel_params.nchunks), s);
 
     MultiSumSqRun<xpu>(weights, kernel_params.ntensors, r1.dptr_, ctx);
-    MultiSumSqRun<xpu>(grads, kernel_params.ntensors, g_sq_norm, ctx);
+    MultiSumSqRun<xpu>(grads, kernel_params.ntensors, g_sq_norm.dptr_, ctx);
     CallKernel1<MPDType, DType>(s, kernel_params, param,
-                                g_sq_norm,
+                                g_sq_norm.dptr_,
                                 temp_m.dptr_,
                                 temp_g.dptr_,
                                 block_to_tensor.dptr_,

@@ -2035,14 +2035,13 @@ class NesLAMB(Optimizer):
     """Nesterov LAMB Optimizer.
     """
     def __init__(self, learning_rate=0.001, beta1=0.9, beta2=0.999, epsilon=1e-6,
-                 lower_bound=None, upper_bound=None, normalized_grad=True, **kwargs):
+                 lower_bound=None, upper_bound=None, **kwargs):
         super(NesLAMB, self).__init__(learning_rate=learning_rate, **kwargs)
         self.beta1 = beta1
         self.beta2 = beta2
         self.epsilon = epsilon
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
-        self.normalized_grad = normalized_grad
         self.aggregate_num = max(1, min(45, int(os.getenv('MXNET_OPTIMIZER_AGGREGATION_SIZE', "45"))))
 
     def create_state(self, index, weight):
@@ -2059,14 +2058,6 @@ class NesLAMB(Optimizer):
             weight = [weight]
             grad = [grad]
             state = [state]
-
-        if self.normalized_grad:
-            for g in grad:
-                g *= self.rescale_grad
-                g /= g.norm()
-            kwargs['rescale_grad'] = 1.
-        else:
-            kwargs['rescale_grad'] = self.rescale_grad
 
         if self.clip_gradient:
             kwargs['clip_gradient'] = self.clip_gradient
