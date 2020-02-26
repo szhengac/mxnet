@@ -37,6 +37,7 @@ from ..ndarray import (sgd_update, sgd_mom_update, adam_update, rmsprop_update, 
                        preloaded_multi_mp_sgd_mom_update, lamb_update_phase1, lamb_update_phase2,
                        mp_lamb_update_phase1, mp_lamb_update_phase2)
 from ..ndarray.contrib import (multi_lamb_update, multi_mp_lamb_update)
+from ..ndarray.contrib import (multi_neslamb_update, multi_mp_neslamb_update)
 from ..ndarray import sparse
 from ..random import normal
 from ..util import is_np_array
@@ -44,7 +45,7 @@ from ..util import is_np_array
 __all__ = [
     'AdaDelta', 'AdaGrad', 'Adam', 'Adamax', 'DCASGD', 'FTML', 'Ftrl', 'LARS', 'LBSGD',
     'NAG', 'NDabs', 'Nadam', 'Optimizer', 'RMSProp', 'SGD', 'SGLD', 'Signum', 'LAMB',
-    'Test', 'Updater', 'ccSGD', 'create', 'get_updater', 'register'
+    'Test', 'Updater', 'ccSGD', 'NesLAMB', 'create', 'get_updater', 'register'
 ]
 
 def _flatten_list(nested_list):
@@ -2028,6 +2029,103 @@ class Nadam(Optimizer):
         # update weight
         weight[:] -= lr * m_t_bar / (sqrt(v_t_prime) + self.epsilon)
 
+
+@register
+class NesLAMB(Optimizer):
+    """Nesterov LAMB Optimizer.
+    """
+    def __init__(self, learning_rate=0.001, beta1=0.9, beta2=0.999, epsilon=1e-6,
+                 lower_bound=None, upper_bound=None, normalized_grad=True, **kwargs):
+        super(NesLAMB, self).__init__(learning_rate=learning_rate, **kwargs)
+        self.beta1 = beta1
+        self.beta2 = beta2
+        self.epsilon = epsilon
+        self.lower_bound = lower_bound
+        self.upper_bound = upper_bound
+        self.normalized_grad = normalized_grad
+        self.aggregate_num = max(1, min(45, int(os.getenv('MXNET_OPTIMIZER_AGGREGATION_SIZE', "45"))))
+
+    def create_state(self, index, weight):
+        stype = weight.stype
+        dtype = weight.dtype
+        return (zeros(weight.shape, weight.context, dtype=dtype, stype=stype),
+                zeros(weight.shape, weight.context, dtype=dtype, stype=stype))
+
+    def _update_impl(self, index, weight, grad, state, multi_precision=False):
+        kwargs = {'beta1': self.beta1, 'beta2': self.beta2, 'epsilon': self.epsilon}
+
+        if not isinstance(index, (tuple, list)):
+            index = [index]
+            weight = [weight]
+            grad = [grad]
+            state = [state]
+
+        if self.normalized_grad:
+            for g in grad:
+                g *= self.rescale_grad
+                g /= g.norm()
+            kwargs['rescale_grad'] = 1.
+        else:
+            kwargs['rescale_grad'] = self.rescale_grad
+
+        if self.clip_gradient:
+            kwargs['clip_gradient'] = self.clip_gradient
+        if self.lower_bound:
+            kwargs['lower_bound'] = self.lower_bound
+        if self.upper_bound:
+            kwargs['upper_bound'] = self.upper_bound
+
+        step_count, lrs, wds = [], [], []
+        for i, w_i, g_i in zip(index, weight, grad):
+            assert (isinstance(w_i, NDArray))
+            assert (isinstance(g_i, NDArray))
+            self._update_count(i)
+            step_count.append(self._index_update_count[i])
+            lrs.append(self._get_lr(i))
+            wds.append(self._get_wd(i))
+
+        updated_tensors = 0
+        while updated_tensors < len(weight):
+            sidx = updated_tensors
+            eidx = min(updated_tensors + self.aggregate_num, len(weight))
+            if not multi_precision:
+                mean, var = list(zip(*state[sidx:eidx]))
+                multi_neslamb_update(weight[sidx:eidx],
+                                     grad[sidx:eidx],
+                                     mean, var,
+                                     out=weight[sidx:eidx],
+                                     step_count=step_count[sidx:eidx],
+                                     lrs=lrs[sidx:eidx],
+                                     wds=wds[sidx:eidx],
+                                     **kwargs)
+            else:
+                mean_var = list(zip(*state[sidx:eidx]))[1]
+                temp = list(zip(*mean_var))
+                mean = temp[0]
+                var = temp[1]
+                multi_mp_neslamb_update(weight[sidx:eidx],
+                                        grad[sidx:eidx],
+                                        mean, var,
+                                        list(zip(*state[sidx:eidx]))[0],
+                                        out=weight[sidx:eidx],
+                                        step_count=step_count[sidx:eidx],
+                                        lrs=lrs[sidx:eidx],
+                                        wds=wds[sidx:eidx],
+                                        **kwargs)
+            updated_tensors += self.aggregate_num
+
+    def update(self, index, weight, grad, state):
+        self._update_impl(index, weight, grad, state, multi_precision=False)
+
+    def update_multi_precision(self, index, weight, grad, state):
+        if not isinstance(index, (tuple, list)):
+            use_multi_precision = self.multi_precision and weight.dtype == numpy.float16
+        else:
+            use_multi_precision = self.multi_precision and weight[0].dtype == numpy.float16
+        self._update_impl(index, weight, grad, state,
+                          multi_precision=use_multi_precision)
+
+
 @register
 class Test(Optimizer):
     """The Test optimizer"""
@@ -2065,7 +2163,6 @@ def _as_classic(a, allow_np):
             else:
                 raise ValueError('Converting np.ndarray to mx.nd.NDArray is not allowed')
     return a
-
 
 
 class Updater(object):
