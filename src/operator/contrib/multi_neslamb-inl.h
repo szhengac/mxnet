@@ -310,10 +310,8 @@ inline void MultiNesLAMB(const nnvm::NodeAttrs& attrs,
     size_t pos_wspace = required_storage_multi_sum_sq;
     Tensor<xpu, 1, float> temp_m(reinterpret_cast<float*>(&workspace[pos_wspace]),
       Shape1(kernel_params.total_size), s);
-    Tensor<xpu, 1, float> temp_g(reinterpret_cast<float*>(&workspace[pos_wspace]),
-      Shape1(kernel_params.total_size), s);
     // create vector of TBlob with all the temp_m and temp_g contiguous
-    std::vector<TBlob> temp_m_tblobs, temp_g_tblobs;
+    std::vector<TBlob> temp_m_tblobs;
     for (size_t index = 0; index < kernel_params.ntensors; ++index) {
       Tensor<xpu, 1, float> aux(reinterpret_cast<float*>(&workspace[pos_wspace]),
         Shape1(kernel_params.sizes[index]), s);
@@ -321,6 +319,9 @@ inline void MultiNesLAMB(const nnvm::NodeAttrs& attrs,
       temp_m_tblobs.emplace_back(newtblob);
       pos_wspace += kernel_params.sizes[index] * sizeof(float);
     }
+    Tensor<xpu, 1, float> temp_g(reinterpret_cast<float*>(&workspace[pos_wspace]),
+      Shape1(kernel_params.total_size), s);
+    std::vector<TBlob> temp_g_tblobs;
     for (size_t index = 0; index < kernel_params.ntensors; ++index) {
       Tensor<xpu, 1, float> aux(reinterpret_cast<float*>(&workspace[pos_wspace]),
         Shape1(kernel_params.sizes[index]), s);
