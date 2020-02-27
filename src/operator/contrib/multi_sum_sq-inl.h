@@ -41,6 +41,8 @@ namespace op {
 
 struct MultiSumSqParam : public dmlc::Parameter<MultiSumSqParam> {
   int num_arrays;
+  float scale;
+  
   DMLC_DECLARE_PARAMETER(MultiSumSqParam) {
     DMLC_DECLARE_FIELD(num_arrays)
     .describe("number of input arrays.");
