@@ -2051,7 +2051,8 @@ class NesLAMB(Optimizer):
                 zeros(weight.shape, weight.context, dtype=dtype, stype=stype))
 
     def _update_impl(self, index, weight, grad, state, multi_precision=False):
-        kwargs = {'beta1': self.beta1, 'beta2': self.beta2, 'epsilon': self.epsilon}
+        kwargs = {'beta1': self.beta1, 'beta2': self.beta2, 'epsilon': self.epsilon,
+                  'rescale_grad': self.rescale_grad}
 
         if not isinstance(index, (tuple, list)):
             index = [index]
