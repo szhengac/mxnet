@@ -85,7 +85,7 @@ __global__ void KernelStep1(const MultiNesLAMBKernelParam<DType, MPDType> kernel
     }
 #pragma unroll
     for (int ii = 0; ii < ILP_LAMB; ii++) {
-      r_grad[ii] = r_grad[ii] / g_norm;
+      r_grad[ii] = (r_grad[ii] * rescale_grad) / g_norm;
       if (clip_gradient >= 0.0f)
         r_grad[ii] = max(min(r_grad[ii], clip_gradient), -clip_gradient);
       r_mean[ii] = static_cast<MPDType>(beta1) * r_mean[ii] + beta3 * r_grad[ii];

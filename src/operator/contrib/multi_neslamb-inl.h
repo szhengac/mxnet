@@ -348,7 +348,7 @@ inline void MultiNesLAMB(const nnvm::NodeAttrs& attrs,
       Shape1(kernel_params.nchunks), s);
 
     MultiSumSqRun<xpu>(weights, kernel_params.ntensors, r1.dptr_, ctx);
-    MultiSumSqRun<xpu>(grads, kernel_params.ntensors, g_sq_norm.dptr_, ctx);
+    MultiSumSqRun<xpu>(grads, kernel_params.ntensors, g_sq_norm.dptr_, ctx, param.rescale_grad);
     CallKernel1<MPDType, DType>(s, kernel_params, param,
                                 g_sq_norm.dptr_,
                                 temp_m.dptr_,

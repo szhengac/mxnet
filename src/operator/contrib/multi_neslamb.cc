@@ -47,7 +47,8 @@ struct MultiNesLAMBKernelStep1 {
         MPDType w = has_mixed_precision ? kernel_params.weights32[index][i]:
                                           MPDType(kernel_params.weights[index][i]);
         float g_norm = sqrt(g_sq_norm[index]);
-        MPDType scaled_grad = static_cast<MPDType>(kernel_params.grads[index][i]) / g_norm;
+        MPDType scaled_grad = static_cast<MPDType>(kernel_params.grads[index][i]) * rescale_grad;
+        scaled_grad /= g_norm;
         if (clip_gradient >= 0.0f)
             scaled_grad = mshadow_op::clip::Map(scaled_grad, static_cast<MPDType>(clip_gradient));
         MPDType mean = static_cast<MPDType>(beta1) * kernel_params.mean[index][i] +
