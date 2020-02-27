@@ -102,10 +102,9 @@ __global__ void MultiSumSqKernel(int chunk_size,
     int i = i_start + threadIdx.x;
 #pragma unroll
     for (int ii = 0; ii < ILP && i < i_max; ++ii, i += blockDim.x) {
+      auto incoming_val = static_cast<float>(x[i]);
       if (scale != 1.0f) {
-         const auto incoming_val = static_cast<float>(x[i]) * scale;
-      } else {
-         const auto incoming_val = static_cast<float>(x[i]);
+         incoming_val *= scale;
       }
       val += incoming_val * incoming_val;
     }
@@ -151,7 +150,7 @@ size_t GetRequiredStorageMultiSumSq<gpu>(const std::vector<TBlob> &inputs,
 
 template<>
 void MultiSumSqRun<gpu>(const std::vector<TBlob> &inputs, int n_inputs,
-                        float *out_ptr, const OpContext &ctx, float scale=1.0f) {
+                        float *out_ptr, const OpContext &ctx, float scale) {
   const int block_size = 512;
   using namespace mxnet_op;
   auto s = ctx.get_stream<gpu>();
